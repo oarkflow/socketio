@@ -24,16 +24,15 @@ func main() {
 
 	server.Of("/").OnConnect(func(s *sio.SocketV4) error {
 		log.Println("connected:", s.ID())
+		err := s.Join("test")
+		if err != nil {
+			panic(err)
+		}
 		s.On("notice", CustomWrap(func(a string) error {
-			return s.Emit("reply", seri.String("have "+a))
+			return s.To("test").Emit("reply", seri.String("have "+a))
 		}))
 		s.On("bye", CustomWrap(func(a string) error {
-			return s.Emit("bye", seri.String(a))
-			return nil
-		}))
-		s.Of("/chat").On("msg", CustomWrap(func(a string) error {
-			fmt.Println("Msg", a)
-			return s.Emit("bye", seri.String(a))
+			return s.To("test").Emit("bye", seri.String(a))
 			return nil
 		}))
 		return nil
@@ -41,6 +40,10 @@ func main() {
 
 	server.Of("/chat").OnConnect(func(s *sio.SocketV4) error {
 		log.Println("connected:", s.ID())
+		err := s.Join("test")
+		if err != nil {
+			panic(err)
+		}
 		s.On("msg", CustomWrap(func(a string) error {
 			server.In()
 			return s.Emit("msg", seri.String(a))

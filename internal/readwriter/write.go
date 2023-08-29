@@ -3,7 +3,7 @@ package readwriter
 import (
 	"bufio"
 	"io"
-	
+
 	errs "github.com/oarkflow/socketio/internal/errors"
 )
 
@@ -35,5 +35,5 @@ func NewWriter(w io.Writer) *Writer {
 	if ww, ok := w.(interface{ PropagateWriter() *Writer }); ok {
 		return ww.PropagateWriter()
 	}
-	return &Writer{w: bufio.NewWriter(w)}
+	return &Writer{w: bufio.NewWriterSize(w, 1e6)}
 }
