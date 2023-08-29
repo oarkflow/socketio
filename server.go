@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"net/http"
 	"time"
-	
+
 	eios "github.com/oarkflow/socketio/engineio/session"
 	seri "github.com/oarkflow/socketio/serialize"
 	sios "github.com/oarkflow/socketio/session"
@@ -28,7 +28,7 @@ type (
 	// reference sessions through the package
 	SessionID = eios.ID
 	SocketID  = sios.ID
-	
+
 	Namespace = string
 	Room      = string
 	Event     = string
@@ -72,21 +72,21 @@ var _socketIDQuickPrefix = func(now time.Time) func() string {
 	return func() string {
 		src := rand.NewSource(now.UnixNano())
 		rnd := rand.New(src)
-		
+
 		cards := [][]rune{
 			{127137, 127150}, // spades
 			{127153, 127166}, // hearts
 			{127169, 127182}, // diamonds
 			{127185, 127198}, // clubs
 		}
-		
+
 		prefix := make([]rune, 5)
 		for i := range prefix {
 			suit := rnd.Intn(4)
 			card := int32(rnd.Intn(int(cards[suit][1]-cards[suit][0]-1))) + cards[suit][0]
 			prefix[i] = card
 		}
-		
+
 		enc := hex.EncodeToString([]byte(string(prefix)))
 		return enc + "::"
 	}

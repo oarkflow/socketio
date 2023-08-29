@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
-	
+
 	eiot "github.com/oarkflow/socketio/engineio/transport"
 )
 

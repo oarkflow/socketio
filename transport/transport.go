@@ -3,7 +3,7 @@ package transport
 import (
 	"io"
 	"strings"
-	
+
 	eiop "github.com/oarkflow/socketio/engineio/protocol"
 	eios "github.com/oarkflow/socketio/engineio/session"
 	eiot "github.com/oarkflow/socketio/engineio/transport"
@@ -14,18 +14,18 @@ import (
 type (
 	// The EngineIO session ID
 	SessionID = eios.ID
-	
+
 	// The SocketID session ID
 	SocketID = sios.ID
-	
+
 	// The functional option that can be used with Packets
 	Option = siop.Option
-	
+
 	Namespace = string
 	Room      = string
-	
+
 	Data interface{} // The Data packet type
-	
+
 	// Socket is a generic socket that is passed to the emit function during execution
 	Socket struct {
 		Type      byte
@@ -57,12 +57,13 @@ func (buf *buffer) StopBuffer() { buf.active = false }
 // HTTP long polling, Websockets or Server-Side events
 type Transport struct {
 	id SocketID
-	
+
 	*buffer
-	
-	receive      chan Socket
-	newPacket    siop.NewPacket
-	eioTransport eiot.Transporter
+
+	receive        chan Socket
+	newPacket      siop.NewPacket
+	eioTransport   eiot.Transporter
+	isDisconnected bool
 }
 
 func NewTransport(id SocketID, eioTransport eiot.Transporter, fn siop.NewPacket) *Transport {
@@ -73,6 +74,14 @@ func NewTransport(id SocketID, eioTransport eiot.Transporter, fn siop.NewPacket)
 		newPacket:    fn,
 		eioTransport: eioTransport,
 	}
+}
+
+func (t *Transport) Disconnect() {
+	t.isDisconnected = true
+}
+
+func (t *Transport) IsDisconnected() bool {
+	return t.isDisconnected
 }
 
 func (t *Transport) SendBuffer() {
@@ -90,7 +99,7 @@ func (t *Transport) Send(data Data, opts ...Option) {
 		t.buffer.packets = append(t.buffer.packets, eioPacket)
 		return
 	}
-	
+
 	t.eioTransport.Send(eioPacket)
 	t.sendBinary(eioPacket)
 }
@@ -116,11 +125,11 @@ func (t *Transport) Receive() <-chan Socket {
 				if _, err := pac.(io.ReaderFrom).ReadFrom(strings.NewReader(data)); err != nil {
 					t.eioTransport.Send(eiop.Packet{T: eiop.NoopPacket, D: err})
 				}
-				
+
 				switch pac.GetType() {
 				case siop.BinaryEventPacket.Byte(), siop.BinaryAckPacket.Byte():
 					if in, ok := pac.(interface{ ReadBinary() func(io.Reader) error }); ok {
-						
+
 						t.receive <- packetToSocket(pac)
 						var cntPlaceholders int
 					EIOPacketData:
@@ -129,7 +138,7 @@ func (t *Transport) Receive() <-chan Socket {
 							if r, ok := eioPacket.D.(io.Reader); ok && bin != nil {
 								bin(r)
 							}
-							
+
 							cntPlaceholders++
 							if cntPlaceholders >= len(pac.GetData().([]interface{}))-1 || // TODO(njones): base this off of the binary index...
 								eioPacket.T != eiop.BinaryPacket {
@@ -139,26 +148,26 @@ func (t *Transport) Receive() <-chan Socket {
 						continue
 					}
 				}
-				
+
 				t.receive <- packetToSocket(pac)
 			}
-			
+
 			switch eioPacket.T {
 			case eiop.NoopPacket:
 				if done, ok := eioPacket.D.(interface{ SocketCloseChannel() error }); ok {
-					
+
 					if err := done.SocketCloseChannel(); err != nil {
 						sioPacket := t.newPacket().
 							WithType(siop.ErrorPacket.Byte()).
 							WithData(err)
 						t.receive <- packetToSocket(sioPacket.(packet))
 					}
-					
+
 					close(t.receive)
 					return
 				}
 			}
-			
+
 		}
 	}()
 	return t.receive

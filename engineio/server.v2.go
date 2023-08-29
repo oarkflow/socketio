@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 	"time"
-	
+
 	eiop "github.com/oarkflow/socketio/engineio/protocol"
 	eios "github.com/oarkflow/socketio/engineio/session"
 	eiot "github.com/oarkflow/socketio/engineio/transport"
@@ -36,12 +36,12 @@ type upgradeable struct {
 
 type serverV2 struct {
 	path *string
-	
+
 	allowUpgrades     bool
 	pingTimeout       time.Duration
 	upgradeTimeout    time.Duration
 	maxHttpBufferSize int
-	
+
 	// https://socket.io/how-to/deal-with-cookies
 	cookie struct {
 		name     string
@@ -49,20 +49,20 @@ type serverV2 struct {
 		httpOnly bool
 		sameSite http.SameSite
 	}
-	
+
 	transportChanBuf int
-	
+
 	initialPackets func(eiot.Transporter, *http.Request)
 	generateID     func() SessionID
-	
+
 	codec eiot.Codec
-	
+
 	eto []eiot.Option
-	
+
 	servers    map[EIOVersionStr]server
 	sessions   transportSessions
 	transports map[TransportName]func(SessionID, eiot.Codec) eiot.Transporter
-	
+
 	transportRunError chan error
 }
 
@@ -80,7 +80,7 @@ func (v2 *serverV2) new(opts ...Option) *serverV2 {
 	v2.maxHttpBufferSize = 10e7
 	v2.transportChanBuf = 1000
 	v2.transportRunError = make(chan error, 1)
-	
+
 	v2.generateID = eios.GenerateID
 	v2.codec = eiot.Codec{
 		PacketEncoder:  eiop.NewPacketEncoderV2,
@@ -88,19 +88,19 @@ func (v2 *serverV2) new(opts ...Option) *serverV2 {
 		PayloadEncoder: eiop.NewPayloadEncoderV2,
 		PayloadDecoder: eiop.NewPayloadDecoderV2,
 	}
-	
+
 	if v2.servers == nil {
 		v2.servers = make(map[EIOVersionStr]server)
 	}
 	v2.servers[Version2] = v2
 	v2.sessions = NewSessions()
 	v2.transports = make(map[TransportName]func(SessionID, eiot.Codec) eiot.Transporter)
-	
+
 	WithTransport("polling", eiot.NewPollingTransport(v2.transportChanBuf))(v2)
 	WithTransport("websocket", eiot.NewWebsocketTransport(v2.transportChanBuf))(v2)
-	
+
 	v2.eto = []eiot.Option{eiot.WithGovernor(1500*time.Microsecond, 500*time.Microsecond)}
-	
+
 	return v2
 }
 
@@ -131,9 +131,9 @@ func (v2 *serverV2) ServeTransport(w http.ResponseWriter, r *http.Request) (eiot
 	if v2.path == nil || !strings.HasPrefix(r.URL.Path, *v2.path) {
 		return nil, ErrInvalidURIPath
 	}
-	
+
 	sessionID := sessionIDFrom(r)
-	
+
 	switch r.Method {
 	case http.MethodGet, http.MethodOptions:
 		break
@@ -145,28 +145,28 @@ func (v2 *serverV2) ServeTransport(w http.ResponseWriter, r *http.Request) (eiot
 	default:
 		return nil, ErrInvalidRequestHTTPMethod
 	}
-	
+
 	eioVersion := eioVersionFrom(r)
 	server, ok := v2.servers[eioVersion]
 	if !ok || eioVersion == "" {
 		return nil, ErrUnknownEIOVersion
 	}
-	
+
 	transportName := transportNameFrom(r)
 	if _, ok := v2.transports[transportName]; !ok || transportName == "" {
 		return nil, ErrUnknownTransport
 	}
-	
+
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, ctxSessionID, sessionID)
 	ctx = context.WithValue(ctx, ctxTransportName, transportName)
 	ctx = context.WithValue(ctx, ctxEIOVersion, eioVersion)
-	
+
 	transport, err := server.serveTransport(w, r.WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return transport, err
 }
 
@@ -179,7 +179,7 @@ func ToEOH(err error) error {
 
 func (v2 *serverV2) serveTransport(w http.ResponseWriter, r *http.Request) (transport eiot.Transporter, err error) {
 	ctx := r.Context()
-	
+
 	if origin := r.Header.Get("Origin"); origin != "" {
 		if strings.EqualFold(origin, r.URL.Hostname()) {
 			w.Header().Set("Access-Control-Allow-Origin", r.URL.Host)
@@ -188,39 +188,39 @@ func (v2 *serverV2) serveTransport(w http.ResponseWriter, r *http.Request) (tran
 	if strings.ToUpper(r.Method) == "OPTIONS" {
 		return nil, IOR
 	}
-	
+
 	sessionID, _ := ctx.Value(ctxSessionID).(SessionID)
 	if sessionID == "" {
 		sessionID = v2.generateID()
-		
+
 		transportName := transportNameFrom(r)
 		transport = v2.transports[transportName](sessionID, v2.codec)
 		if err := v2.sessions.Set(transport); err != nil {
 			return nil, err
 		}
-		
+
 		transport.Send(v2.handshakePacket(sessionID, transportName))
 		if v2.initialPackets != nil {
 			v2.initialPackets(transport, r)
 		}
-		
+
 		if t, ok := transport.(interface {
 			Write(http.ResponseWriter, *http.Request) error
 		}); ok {
 			transport.Send(eiop.Packet{T: eiop.NoopPacket, D: eiot.WriteClose{}})
-			
+
 			ctx = v2.sessions.WithTimeout(ctx, v2.pingTimeout)
 			ctx = v2.sessions.WithInterval(ctx, v2.pingTimeout-10*time.Millisecond)
-			
+
 			return transport, ToEOH(t.Write(w, r.WithContext(ctx)))
 		}
 	}
-	
+
 	upgrade := v2.doUpgrade(v2.sessions.Get(sessionID))(w, r)
 	if upgrade.err != nil {
 		return nil, upgrade.err
 	}
-	
+
 	var opts []eiot.Option
 	if upgrade.isProbeOnInit {
 		opts = []eiot.Option{eiot.OnInitProbe(upgrade.isProbeOnInit)}
@@ -228,15 +228,15 @@ func (v2 *serverV2) serveTransport(w http.ResponseWriter, r *http.Request) (tran
 	if upgrade.upgradeFn != nil {
 		opts = []eiot.Option{eiot.OnUpgrade(upgrade.upgradeFn)}
 	}
-	
+
 	ctx = v2.sessions.WithTimeout(ctx, v2.pingTimeout*4)
 	ctx = v2.sessions.WithInterval(ctx, v2.pingTimeout)
-	
+
 	opts = append(opts, eiot.WithNoPing())
 	go func() {
 		v2.transportRunError <- upgrade.transport.Run(w, r.WithContext(ctx), append(v2.eto, opts...)...)
 	}()
-	
+
 	return upgrade.transport, nil
 }
 

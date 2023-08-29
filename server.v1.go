@@ -3,10 +3,11 @@ package socketio
 import (
 	"context"
 	"errors"
+	eiot "github.com/oarkflow/socketio/engineio/transport"
 	"net/http"
 	"strings"
 	"sync"
-	
+
 	nmem "github.com/oarkflow/socketio/adaptor/transport/memory"
 	eio "github.com/oarkflow/socketio/engineio"
 	erro "github.com/oarkflow/socketio/internal/errors"
@@ -23,18 +24,18 @@ import (
 // ServerV1 is the same as the javascript SocketIO v1.0 server.
 type ServerV1 struct {
 	inSocketV1
-	
+
 	run                func(socketID SocketID, req *Request) error
 	doConnectPacket    func(socketID SocketID, socket siot.Socket, req *Request) error
 	doDisconnectPacket func(socketID SocketID, socket siot.Socket, req *Request) error
 	doEventPacket      func(socketID SocketID, socket siot.Socket) error
 	doAckPacket        func(socketID SocketID, socket siot.Socket) error
-	
+
 	path *string
-	
+
 	ctx context.Context
 	eio eio.EIOServer
-	
+
 	transport siot.Transporter
 }
 
@@ -42,13 +43,13 @@ type ServerV1 struct {
 func NewServerV1(opts ...Option) *ServerV1 {
 	v1 := &ServerV1{inSocketV1: inSocketV1{ʟ: new(sync.RWMutex), x: new(sync.Mutex)}}
 	v1.new(opts...)
-	
+
 	v1.eio = eio.NewServerV2(
 		eio.WithPath(*v1.path),
 		eio.WithInitialPackets(autoConnect(v1)),
 	).(eio.EIOServer)
 	v1.eio.With(opts...)
-	
+
 	v1.With(opts...)
 	return v1
 }
@@ -63,21 +64,21 @@ func (v1 *ServerV1) new(opts ...Option) Server {
 	v1.doDisconnectPacket = doDisconnectPacket(v1)
 	v1.doEventPacket = doEventPacket(v1)
 	v1.doAckPacket = doAckPacket(v1)
-	
+
 	v1.ns = "/"
 	v1.path = ampersand("/socket.io/")
 	v1.events = make(map[Namespace]map[Event]map[SocketID]eventCallback)
 	v1.onConnect = make(map[Namespace]onConnectCallbackVersion1)
-	
+
 	v1.protectedEventName = v1ProtectedEventName
-	
+
 	v1.transport = nmem.NewInMemoryTransport(siop.NewPacketV2) // set the default transport
-	
+
 	v1.inSocketV1.binary = true   // for the v1 implementation this always is set to true
 	v1.inSocketV1.compress = true // for the v1 implementation this always is set to true
-	
+
 	v1.inSocketV1.setTransporter(v1.transport)
-	
+
 	return v1
 }
 
@@ -111,12 +112,12 @@ func (v1 *ServerV1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if v1.path != nil && !strings.HasPrefix(r.URL.Path, *v1.path) { // lock to the default socketio path if present
 		return
 	}
-	
+
 	ctx := r.Context()
 	if v1.ctx != nil {
 		ctx = v1.ctx
 	}
-	
+
 	var eState erro.State
 	if err := v1.serveHTTP(w, r.WithContext(ctx)); err != nil {
 		switch {
@@ -138,12 +139,30 @@ func (v1 *ServerV1) serveHTTP(w http.ResponseWriter, r *http.Request) (err error
 	if err != nil {
 		return err
 	}
-	
+	go func(e eiot.Transporter) {
+		for {
+			sessionId, ok := <-e.ReceiveTimeout()
+			if ok {
+				socketId := v1.transport.GetSocketID(sessionId)
+				if socketId != nil && !v1.tr().IsDisconnected(*socketId) {
+					for namespaceId, namespaces := range v1.events {
+						if events, ok := namespaces[OnDisconnectEvent]; ok {
+							if fn, ok := events[*socketId]; ok {
+								v1.tr().Leave(namespaceId, *socketId, socketIDPrefix+socketId.String())
+								fn.Callback("client namespace disconnect.")
+							}
+						}
+					}
+				}
+				return
+			}
+		}
+	}(eioTransport)
 	sid, err := v1.transport.Add(eioTransport)
 	if err != nil {
 		return err
 	}
 	v1.setSocketID(sid)
-	
+
 	return v1.run(sid, sioRequest(r))
 }

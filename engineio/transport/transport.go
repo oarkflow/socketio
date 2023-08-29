@@ -2,7 +2,7 @@ package transport
 
 import (
 	"net/http"
-	
+
 	eiop "github.com/oarkflow/socketio/engineio/protocol"
 	eios "github.com/oarkflow/socketio/engineio/session"
 )
@@ -31,9 +31,10 @@ type Transporter interface {
 	Name() Name
 	Send(eiop.Packet)
 	Receive() <-chan eiop.Packet
-	
+	SendTimeout()
+	ReceiveTimeout() <-chan SessionID
 	Run(http.ResponseWriter, *http.Request, ...Option) error
-	
+
 	Shutdown()
 }
 
@@ -45,12 +46,12 @@ type Transport struct {
 	id    SessionID
 	name  Name
 	codec Codec
-	
+
 	sendPing bool
-	
+
 	send, receive chan eiop.Packet
-	
-	shutdown func()
+	expireId      chan SessionID
+	shutdown      func()
 }
 
 func (t *Transport) ID() SessionID               { return t.id }
@@ -63,3 +64,5 @@ func (t *Transport) Shutdown() {
 		t.shutdown()
 	}
 }
+func (t *Transport) SendTimeout()                     { t.expireId <- t.id }
+func (t *Transport) ReceiveTimeout() <-chan SessionID { return t.expireId }

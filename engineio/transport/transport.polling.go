@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	
+
 	"golang.org/x/text/transform"
-	
+
 	eiop "github.com/oarkflow/socketio/engineio/protocol"
 	eios "github.com/oarkflow/socketio/engineio/session"
 )
@@ -23,9 +23,9 @@ type handlerWithError func(http.ResponseWriter, *http.Request) error
 
 type PollingTransport struct {
 	*Transport
-	
+
 	sleep time.Duration
-	
+
 	compress func(handlerWithError) handlerWithError
 }
 
@@ -39,6 +39,7 @@ func NewPollingTransport(chanBuf int) func(SessionID, Codec) Transporter {
 				send:     make(chan eiop.Packet, chanBuf),
 				receive:  make(chan eiop.Packet, chanBuf),
 				sendPing: true,
+				expireId: make(chan eios.ID),
 			},
 			compress: func(fn handlerWithError) handlerWithError {
 				return func(w http.ResponseWriter, r *http.Request) error {
@@ -47,7 +48,7 @@ func NewPollingTransport(chanBuf int) func(SessionID, Codec) Transporter {
 			},
 			sleep: 25 * time.Millisecond,
 		}
-		
+
 		return t
 	}
 }
@@ -62,7 +63,7 @@ func (t *PollingTransport) InnerTransport() *Transport { return t.Transport }
 
 func (t *PollingTransport) Run(w http.ResponseWriter, r *http.Request, opts ...Option) (err error) {
 	t.With(opts...)
-	
+
 	switch r.Method {
 	case http.MethodGet:
 		return t.compress(jsonp(t.poll))(w, r)
@@ -71,7 +72,7 @@ func (t *PollingTransport) Run(w http.ResponseWriter, r *http.Request, opts ...O
 		return t.emit(w, r)
 	}
 	return nil
-	
+
 }
 
 func (t *PollingTransport) Write(w http.ResponseWriter, r *http.Request) error {
@@ -101,22 +102,22 @@ Write:
 		}
 		packets = append(packets, packet)
 	}
-	
+
 	if buffer.use {
 		for _, packet := range packets[buffer.idx:] {
 			t.receive <- packet
 		}
 	}
-	
+
 	return t.codec.PayloadEncoder.To(w).WritePayload(packets[:buffer.idx])
 }
 
 // longPoll allows a connection for a specified amout of time... then releases a payload
 func (t *PollingTransport) poll(w http.ResponseWriter, r *http.Request) (err error) {
-	
+
 	var ctx = r.Context()
 	var interval, timeout, cancel = make(<-chan time.Time), make(<-chan struct{}), make(<-chan func())
-	
+
 	if fn, ok := ctx.Value(eios.SessionIntervalKey).(eios.IntervalChannel); ok {
 		interval = fn()
 	}
@@ -126,7 +127,7 @@ func (t *PollingTransport) poll(w http.ResponseWriter, r *http.Request) (err err
 	if fn, ok := ctx.Value(eios.SessionCloseChannelKey).(func() <-chan func()); ok {
 		cancel = fn()
 	}
-	
+
 	var done func()
 	var packets eiop.Payload
 
@@ -158,7 +159,7 @@ Write:
 			}
 		}
 	}
-	
+
 	select {
 	case stop := <-cancel:
 		if stop != nil {
@@ -176,14 +177,14 @@ Write:
 			}
 		}
 	}
-	
+
 	t.send <- eiop.Packet{T: eiop.NoopPacket, D: socketClose{ErrCloseSocket}} // shutdown the HTTP connection
 	return err
 }
 
 // gather pulls in all of the posts
 func (t *PollingTransport) emit(w http.ResponseWriter, r *http.Request) error {
-	
+
 	var payload eiop.Payload
 	if err := t.codec.PayloadDecoder.From(r.Body).ReadPayload(&payload); err != nil {
 		t.send <- eiop.Packet{T: eiop.NoopPacket, D: socketClose{err}}
@@ -206,9 +207,9 @@ Read:
 		}
 		t.send <- packet
 	}
-	
+
 	t.send <- eiop.Packet{T: eiop.NoopPacket, D: socketClose{}} // shutdown the HTTP connection
-	
+
 	return nil
 }
 
@@ -238,10 +239,10 @@ func WithHTTPCompression(kind HTTPCompressionKind) Option {
 							return fn(w, r)
 						}
 						w.Header().Set("Content-Encoding", "gzip")
-						
+
 						gz := gzip.NewWriter(w)
 						defer gz.Close()
-						
+
 						gzr := compressResponseWriter{Writer: gz, ResponseWriter: w}
 						return fn(gzr, r)
 					}
@@ -276,17 +277,17 @@ func jsonp(next handlerWithError) handlerWithError {
 		if j = r.URL.Query().Get("j"); j == "" {
 			return next(w, r)
 		}
-		
+
 		tw := transform.NewWriter(w, quoteTransform{})
-		
+
 		w.Header().Set("Content-type", "application/json")
 		fmt.Fprintf(w, `___eio[%s]("`, j)
-		
+
 		next(quoteWriter{Writer: tw, ResponseWriter: w}, r)
 		tw.Close()
-		
+
 		fmt.Fprint(w, `");`)
-		
+
 		return nil
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	
+
 	eiot "github.com/oarkflow/socketio/engineio/transport"
 	siop "github.com/oarkflow/socketio/protocol"
 	siot "github.com/oarkflow/socketio/transport"
@@ -17,12 +17,12 @@ func autoConnect(v1 *ServerV1) func(transport eiot.Transporter, r *http.Request)
 			v1.tr().Send(socketID, serviceError(err), siop.WithType(siop.ErrorPacket.Byte()))
 			return
 		}
-		
+
 		socket := siot.Socket{
 			Type:      siop.ConnectPacket.Byte(),
 			Namespace: "/",
 		}
-		
+
 		if err := v1.doConnectPacket(socketID, socket, sioRequest(r)); err != nil {
 			v1.tr().Send(socketID, serviceError(err), siop.WithType(siop.ErrorPacket.Byte()))
 			return
@@ -82,13 +82,13 @@ func doConnectPacket(v1 *ServerV1) func(SocketID, siot.Socket, *Request) error {
 		unlock := v1.r()
 		tr := v1.tr()
 		unlock()
-		
+
 		tr.Join(socket.Namespace, socketID, socketID.Room(socketIDPrefix))
-		
+
 		v1.setPrefix()
 		v1.setSocketID(socketID)
 		v1.setNsp(socket.Namespace)
-		
+
 		if fn, ok := v1.onConnect[socket.Namespace]; ok {
 			tr.Send(socketID, nil, siop.WithType(byte(siop.ConnectPacket)), siop.WithNamespace(socket.Namespace))
 			return fn(&SocketV1{inSocketV1: v1.inSocketV1.clone(), req: req, Connected: true})
@@ -101,11 +101,13 @@ func doDisconnectPacket(v1 *ServerV1) func(SocketID, siot.Socket, *Request) erro
 	return func(socketID SocketID, socket siot.Socket, req *Request) (err error) {
 		if fn, ok := v1.events[socket.Namespace][OnDisconnectEvent][socketID]; ok {
 			v1.tr().Leave(socket.Namespace, socketID, socketIDPrefix+socketID.String())
+			v1.tr().Disconnect(socketID)
 			return fn.Callback("client namespace disconnect")
 		}
 		// for any socket id at the io. (server) level...
 		if fn, ok := v1.events[socket.Namespace][OnDisconnectEvent][serverEvent]; ok {
 			v1.tr().Leave(socket.Namespace, socketID, socketIDPrefix+socketID.String())
+			v1.tr().Disconnect(socketID)
 			return fn.Callback("client namespace disconnect")
 		}
 		return ErrOnDisconnectSocket
@@ -117,7 +119,7 @@ func doEventPacket(v1 *ServerV1) func(SocketID, siot.Socket) error {
 		type callbackAck interface {
 			CallbackAck(...interface{}) []interface{}
 		}
-		
+
 		switch data := socket.Data.(type) {
 		case []interface{}:
 			event, ok := data[0].(string)
@@ -127,7 +129,7 @@ func doEventPacket(v1 *ServerV1) func(SocketID, siot.Socket) error {
 			if socket.Type != siop.DisconnectPacket.Byte() {
 				data = data[1:]
 			}
-			
+
 			if fn, ok := v1.events[socket.Namespace][event][socketID]; ok {
 				if socket.AckID > 0 {
 					if fn, ok := fn.(callbackAck); ok {
@@ -151,7 +153,7 @@ func doEventPacket(v1 *ServerV1) func(SocketID, siot.Socket) error {
 			if socket.Type != siop.DisconnectPacket.Byte() {
 				data = data[1:]
 			}
-			
+
 			if fn, ok := v1.events[socket.Namespace][event][socketID]; ok {
 				return fn.Callback(stoi(data)...)
 			}

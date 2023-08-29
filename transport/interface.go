@@ -13,8 +13,11 @@ type Transporter interface {
 	AddSetter
 	JoinLeaver
 	SendReceiver
-	
+
 	AckID() uint64
+	GetSocketID(eiot.SessionID) *SocketID
+	Disconnect(SocketID)
+	IsDisconnected(SocketID) bool
 }
 
 type Sender interface {
@@ -38,7 +41,7 @@ type AddSetter interface {
 
 type Emitter interface {
 	Sender
-	
+
 	Sockets(ns Namespace) SocketArray
 	Rooms(ns Namespace, id SocketID) RoomArray
 }
